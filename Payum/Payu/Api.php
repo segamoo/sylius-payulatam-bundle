@@ -1,12 +1,5 @@
 <?php
 
-/**
- * (c) FSi sp. z o.o. <info@fsi.pl>
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
-
 namespace FSi\Bundle\SyliusPayuBundle\Payum\Payu;
 
 use Buzz\Client\ClientInterface;
@@ -15,9 +8,9 @@ use Buzz\Message\Response;
 
 class Api
 {
-    const PAYU_BASE_URL = 'https://secure.payu.com';
+    const PAYU_BASE_URL = 'https://gatewaylap.pagosonline.net/';
 
-    const PAYU_SANDBOX_URL = 'https://sandbox.payu.pl';
+    const PAYU_SANDBOX_URL = 'https://gatewaylap.pagosonline.net/ppp-web-gateway';
 
     const PAYMENT_STATUS_OK = 'OK';
 
@@ -36,12 +29,10 @@ class Api
     const PAYMENT_STATE_COMPLETED = '99';
 
     protected $options = array(
-        'key1' => null,
-        'key2' => null,
-        'pos_id' => null,
-        'pos_auth_key' => null,
+        'merchantid' => null,
+        'apikey' => null,
+        'charset' => 'UTF',
         'sandbox' => false,
-        'charset' => 'UTF'
     );
 
     /**
@@ -64,7 +55,7 @@ class Api
      */
     public function getNewPaymentUrl()
     {
-        return sprintf('%s/paygw/%s/NewPayment', $this->getPayuUrl(), $this->options['charset']);
+        return $this->getPayuUrl();
     }
 
     /**
@@ -76,8 +67,8 @@ class Api
         $details = array_merge(
             $details,
             array(
-                'pos_id' => $this->options['pos_id'],
-                'pos_auth_key' => $this->options['pos_auth_key']
+                'usuarioId' => $this->options['usuarioId'],
+                'firma' => $this->options['firma']
             )
         );
 
@@ -90,21 +81,22 @@ class Api
      */
     public function validatePaymentNotification(array $notificationDetails)
     {
-        if (!array_key_exists('pos_id', $notificationDetails) || !array_key_exists('session_id', $notificationDetails) ||
-            !array_key_exists('ts', $notificationDetails) || !array_key_exists('sig', $notificationDetails) ) {
+        if (!array_key_exists('usuarioId', $notificationDetails) || !array_key_exists('session_id', $notificationDetails) ||
+            !array_key_exists('signature', $notificationDetails) ) {
             throw new \InvalidArgumentException(
-                "Missing one of pos_id, session_id, ts or sig in payment notification"
+                "Missing one of usuarioId, session_id, or signature in payment notification"
             );
         }
 
         $notificationSignature = md5(
-            $notificationDetails['pos_id'] .
-            $notificationDetails['session_id'] .
-            $notificationDetails['ts'] .
-            $this->options['key2']
+            $this->options['apikey'] .'~'.
+            $this->options['merchantid'] .'~'.
+            $notificationDetails['referenceCode'] .'~'.
+            $notificationDetails['amount'] .'~'.
+            $notificationDetails['currency']
         );
 
-        if ($notificationSignature != $notificationDetails['sig']) {
+        if ($notificationSignature != $notificationDetails['signature']) {
             throw new \InvalidArgumentException(
                 "Invalid payment notification signature"
             );
@@ -113,27 +105,30 @@ class Api
 
     public function getPaymentDetails($notificationDetails)
     {
-        $ts = time();
-        $paymentSignature = md5(
-            $notificationDetails['pos_id'] .
-            $notificationDetails['session_id'] .
-            $ts .
-            $this->options['key1']
+        $notificationSignature = md5(
+            $this->options['apikey'] .'~'.
+            $this->options['merchantid'] .'~'.
+            $notificationDetails['referenceCode'] .'~'.
+            $notificationDetails['amount'] .'~'.
+            $notificationDetails['currency']
         );
 
         $request = new Request(
             Request::METHOD_POST,
-            sprintf('/paygw/%s/Payment/get', $this->options['charset']),
+            $this->options['charset'],
             $this->getPayuUrl()
         );
 
         $request->setContent(
             sprintf(
-                'pos_id=%s&session_id=%s&ts=%s&sig=%s',
-                $notificationDetails['pos_id'],
-                $notificationDetails['session_id'],
-                $ts,
-                $paymentSignature
+                'usuarioId=%s&Api Key=%s&refVenta=%s&decripión=%s&valor=%s&moneda=%s&firma=%s',
+                $notificationDetails['merchantid'],
+                $notificationDetails['apikey'],
+                $notificationDetails['referenceCode'],
+                $notificationDetails['description'],
+                $notificationDetails['amount'],
+                $notificationDetails['currency'],
+                $notificationSignature
             )
         );
 
@@ -150,17 +145,14 @@ class Api
     public function validatePaymentDetails($paymentDetails)
     {
         $paymentSignature = md5(
-            $paymentDetails['pos_id'] .
-            $paymentDetails['session_id'] .
-            $paymentDetails['order_id'] .
-            $paymentDetails['status'] .
-            $paymentDetails['amount'] .
-            $paymentDetails['desc'] .
-            $paymentDetails['ts'] .
-            $this->options['key2']
+            $this->options['apikey'] .'~'.
+            $this->options['merchantid'] .'~'.
+            $paymentDetails['referenceCode'] .'~'.
+            $paymentDetails['amount'] .'~'.
+            $paymentDetails['currency']
         );
 
-        if ($paymentSignature != $paymentDetails['sig']) {
+        if ($paymentSignature != $paymentDetails['signature']) {
             throw new \RuntimeException("Invalid payment signature");
         }
     }
